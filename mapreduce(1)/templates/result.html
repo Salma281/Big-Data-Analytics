@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% macro chips(pairs, cls="", limit=40) %}
+<div class="chips">{% for p in pairs[:limit] %}<span class="chip {{ cls }}">{{ p|pair }}</span>{% else %}<span class="meta">nothing</span>{% endfor %}
+{% if pairs|length > limit %}<span class="meta">+{{ pairs|length - limit }} more</span>{% endif %}</div>
+{% endmacro %}
+{% block body %}
+<h1>{{ label }} result</h1>
+<p class="lead">{{ job.maps|length }} split{{ "s" if job.maps|length != 1 }}, {{ job.workers }} parallel worker{{ "s" if job.workers != 1 }}, 2 reducers, finished in {{ ((job.t1-job.t0)*1000)|round|int }} ms.</p>
+<div class="nav"><a class="btn alt" href="/">← Previous</a>
+<nav class="tabs" aria-label="Output view">{% for v,t in [('simple','Process'),('detail','Process in details'),('flow','Flow map')] %}<a href="/result?view={{ v }}" {% if view==v %}aria-current="page"{% endif %}>{{ t }}</a>{% endfor %}</nav></div>
+{% if not rows %}<div class="err" role="alert">No records were emitted. For {{ label }}, {% if job.mode in ("wordcount", "top10") %}the input must contain words.{% else %}each line must be a key followed by a number, like <code>Chai,3</code> or <code>Chai 3</code>.{% endif %} {{ job.skipped }} line(s) had no number and were skipped. Plain-text files only work with Word count, Top 10, or Count.</div>
+{% elif job.skipped %}<p class="meta">{{ job.skipped }} line(s) had no number and were skipped.</p>{% endif %}
+
+
+{% if view == 'simple' %}
+<h2>Answer</h2>
+<div class="panel"><table>
+<tr><th>Key</th><th>{{ label }}</th><th>Reducer</th></tr>
+{% for k,v,r in rows %}<tr><td>{{ k }}</td><td class="num">{{ v|fmt }}</td><td><span class="tag r{{ r+1 }}">{{ "a–f" if r==0 else "g–z" }} · {{ "part-%05d"|format(r) }}</span></td></tr>
+{% else %}<tr><td colspan="3">No valid records found in the uploaded files.</td></tr>{% endfor %}
+</table></div>
+
+{% elif view == 'detail' %}
+<h2>Step 0 · Setup</h2>
+<div class="panel">Folder split into <b>{{ job.maps|length }}</b> files, so <b>{{ job.maps|length }}</b> map tasks. Concurrency limit = min(files, CPU cores) = <b>{{ job.workers }}</b>. Operation: <b>{{ label }}</b>. Every mapper combines its own output before the shuffle. Partitioner: words a–f go to reducer 1, g–z go to reducer 2.</div>
+
+<section class="phase"><h2>1 · Map task (one per split, running in parallel)</h2>
+{% for m in job.maps %}
+<div class="panel split">
+  <header><h3>Split {{ loop.index }} · {{ m.split }}</h3>
+  <span class="meta">PID {{ m.pid }} · ran {{ ((m.start-job.t0)*1000)|round(1) }}–{{ ((m.end-job.t0)*1000)|round(1) }} ms{% if m.skipped %} · {{ m.skipped }} bad line(s) skipped{% endif %}</span></header>
+  <pre>{{ m.preview }}</pre>
+  <div class="stages" style="margin-top:12px">
+    <div class="stage m"><h3>Map · {{ m.mapped|length }} pairs</h3>{{ chips(m.mapped) }}</div>
+    <div class="stage c"><h3>Combine · {% if job.use_combiner %}{{ m.mapped|length }} → {{ m.combined|length }} pairs{% else %}skipped{% endif %}</h3>
+      {% if job.use_combiner %}{{ chips(m.combined) }}{% else %}<span class="meta">Combiner is optional and was turned off.</span>{% endif %}</div>
+    <div class="stage p"><h3>Partition</h3>
+      <p class="meta" style="margin:0">Reducer 1 (a–f)</p>{{ chips(m.partitions[0], "r1") }}
+      <p class="meta" style="margin:6px 0 0">Reducer 2 (g–z)</p>{{ chips(m.partitions[1], "r2") }}</div>
+  </div>
+</div>{% endfor %}</section>
+
+<div class="barrier">All mappers finished. Partitions now travel to the reducers.</div>
+
+<section class="phase reduce"><h2>2 · Reduce task</h2>
+<div class="cols">
+{% for r in job.reducers %}
+<div class="panel">
+  <h3><span class="tag r{{ r.reducer+1 }}">Reducer {{ r.reducer+1 }} · {{ "a–f" if r.reducer==0 else "g–z" }}</span></h3>
+  <p class="meta">Shuffle: pairs received from each mapper</p>
+  {% for name, ps in job.received[r.reducer] %}<p style="margin:6px 0 2px"><b>{{ name }}</b></p>{{ chips(ps, "r"~(r.reducer+1)) }}{% endfor %}
+  <p class="meta" style="margin-top:14px">Sort and group: key → list of values</p>
+  <table>{% for k, vals in r.groups %}<tr><td>{{ k }}</td><td class="num">[{% for v in vals %}{{ v|fmt }}{{ ", " if not loop.last }}{% endfor %}]</td></tr>{% else %}<tr><td class="meta">no keys</td></tr>{% endfor %}</table>
+  <p class="meta" style="margin-top:14px">Reduce ({{ label }}) → written to <b>output/{{ r.file }}</b></p>
+  <table>{% for k, v in r.result %}<tr><td>{{ k }}</td><td class="num">{{ v|fmt }}</td></tr>{% endfor %}</table>
+</div>{% endfor %}</div></section>
+
+<h2>Final output</h2>
+<div class="panel"><table><tr><th>Key</th><th>{{ label }}</th><th>Output file</th></tr>
+{% for k,v,r in rows %}<tr><td>{{ k }}</td><td class="num">{{ v|fmt }}</td><td><span class="tag r{{ r+1 }}">{{ "part-%05d"|format(r) }}</span></td></tr>{% endfor %}</table></div>
+{% else %}{% include "flow.html" %}{% endif %}
+{% endblock %}

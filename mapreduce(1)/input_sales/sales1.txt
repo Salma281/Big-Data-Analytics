@@ -1,0 +1,5 @@
+Chai,3
+Sauce,5
+Tofu,8
+Chai,9
+Tofu,1

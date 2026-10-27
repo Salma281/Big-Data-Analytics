@@ -1,0 +1,80 @@
+{% extends "base.html" %}{% block body %}
+<h1>MapReduce lab</h1>
+<p class="lead">Upload a folder of text files. Each file becomes one split and one parallel map task. Pick an operation and how you want to see the result.</p>
+{% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
+<form class="panel" id="job" method="post" action="/run" enctype="multipart/form-data">
+  {% if st.files %}<div class="saved">Saved folder: <b>{{ st.files|length }} file{{ "s" if st.files|length != 1 }}</b> ({{ st.files|map(attribute=0)|join(", ") }}). Choose a folder below only if you want to replace it.</div>{% endif %}
+  <label for="files">Input folder</label>
+  <input id="files" type="file" name="files" webkitdirectory directory multiple {{ "" if st.files else "required" }}>
+  <p class="hint">Only .txt files are used. Text analytics counts words or finds the most frequent words. Numeric operations use values in lines like <code>Chai,3</code> or <code>Chai 3</code>; Count counts records by key.</p>
+
+  <label for="processing_type">Processing Type</label>
+  <select id="processing_type" name="processing_type">
+    <option value="text" {{ "selected" if (st.processing_type or "text") == "text" }}>Text analytics MapReduce</option>
+    <option value="numeric" {{ "selected" if st.processing_type == "numeric" }}>Numeric MapReduce</option>
+  </select>
+
+  <label for="operation">Operation</label>
+  <select id="operation" name="operation" data-selected="{{ st.operation or st.mode or 'wordcount' }}">
+  </select>
+  <p class="hint" id="operation-hint"></p>
+
+  <label>View</label>
+  <div class="choice">
+    {% for k,t,d in [("simple","Process","Final answer only."),("detail","Process in details","Map, combine, partition, shuffle, sort and reduce, step by step."),("flow","Flow map","An animated diagram from folder to output files.")] %}
+    <label><input type="radio" name="view" value="{{ k }}" {{ "checked" if (st.view or "simple")==k }}><b>{{ t }}</b>{{ d }}</label>{% endfor %}
+  </div>
+  <p style="margin-top:20px"><button type="submit" id="go">Run job</button></p>
+</form>
+<div class="overlay" id="busy" hidden role="status"><div class="spin"></div><div>Running your job…</div></div>
+<script>
+const f=document.getElementById('job'),o=document.getElementById('busy'),g=document.getElementById('go');
+f.addEventListener('submit',()=>{o.hidden=false;g.disabled=true;g.textContent='Running…';});
+addEventListener('pageshow',()=>{o.hidden=true;g.disabled=false;g.textContent='Run job';});
+
+const processingType=document.getElementById('processing_type');
+const operation=document.getElementById('operation');
+const operationHint=document.getElementById('operation-hint');
+const operations={
+  text:[
+    {value:'wordcount',label:'Word Count',hint:'Count occurrences of each word across all files.'},
+    {value:'top10',label:'Most Frequent Words (Max top 10 words)',hint:'Show up to ten words, ordered from highest to lowest frequency.'}
+  ],
+  numeric:[
+    {value:'sum',label:'Sum',hint:'Calculate the total numeric value for each key.'},
+    {value:'count',label:'Count',hint:'Count records belonging to each key.'},
+    {value:'min',label:'Minimum',hint:'Find the smallest numeric value for each key.'},
+    {value:'max',label:'Maximum',hint:'Find the largest numeric value for each key.'},
+    {value:'average',label:'Average',hint:'Calculate the average numeric value for each key.'}
+  ]
+};
+
+function updateOperations(){
+  const available=operations[processingType.value];
+  const previous=operation.value;
+  const saved=operation.dataset.selected;
+  operation.replaceChildren();
+  available.forEach(item=>{
+    const option=document.createElement('option');
+    option.value=item.value;
+    option.textContent=item.label;
+    operation.appendChild(option);
+  });
+  const preferred=available.find(item=>item.value===saved);
+  const previousOption=available.find(item=>item.value===previous);
+  operation.value=(previousOption||preferred||available[0]).value;
+  operationHint.textContent=available.find(item=>item.value===operation.value).hint;
+  operation.dataset.selected=operation.value;
+}
+
+processingType.addEventListener('change',()=>{
+  operation.dataset.selected='';
+  updateOperations();
+});
+operation.addEventListener('change',()=>{
+  operation.dataset.selected=operation.value;
+  operationHint.textContent=operations[processingType.value].find(item=>item.value===operation.value).hint;
+});
+updateOperations();
+</script>
+{% endblock %}
